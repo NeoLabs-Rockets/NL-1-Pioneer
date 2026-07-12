@@ -24,12 +24,16 @@
 | Klima | B2, B4, C6 |
 | AeroTech (Q-Jet) | C12, C18, D10, D13, D20 *(some variants may be slightly longer than 70 mm)* |
 
+</div>
+
 # Print Settings
 
 * **Material:** ABS recommended; PLA+ is also suitable.
 * **Infill:** the less the better. **5%**
 * **Orientation:** Print the model vertically.
 * **Supports:** normal Supports (Auto), **5° overhang angle**.
+
+<div align="center">
 
 <img width="284" height="782" alt="image" src="https://github.com/user-attachments/assets/9cb37dd3-bf62-48fa-8d4a-9fca75b3c756" />
 
