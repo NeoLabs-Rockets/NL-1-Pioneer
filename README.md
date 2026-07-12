@@ -13,10 +13,18 @@
 
 ---
 
+The **NL-1 Pioneer** is the very first rocket developed under the NeoLabs-Rockets project. Designed as an affordable and modular entry point into model rocketry, it serves as the foundation for future NeoLabs rocket designs.
+
+This version is intentionally simple and lightweight. It is currently **non-reusable** (except in special recovery situations), as it does not yet include a parachute or other dedicated recovery system. The focus is on providing an easy-to-build, reliable platform for learning, testing, and future upgrades.
+
+The rocket is designed to be **modular**, **low-cost**, and **easy to extend** with future payloads or recovery systems. Most parts are **print-in-place**, minimizing assembly effort while keeping the design accessible for anyone with a standard 3D printer.
+
 </div>
+
 <div align="center">
   
 # Compatible with the following motors
+
 | Manufacturer | Motors |
 |--------------|--------|
 | Estes | 1/2A6-2, A8-3, B4-2, B6-4, B6-6, C5-3, C6-3, C6-5, C6-7 |
@@ -28,10 +36,10 @@
 
 # Print Settings
 
-* **Material:** ABS recommended; PLA+ is also suitable.
-* **Infill:** the less the better. **5%**
-* **Orientation:** Print the model vertically.
-* **Supports:** normal Supports (Auto), **5° overhang angle**.
+* **Material:** ABS is recommended for improved heat resistance and durability. PLA+ also works well for normal use.
+* **Infill:** The lower, the better. **5%** is recommended to reduce weight while maintaining sufficient strength.
+* **Orientation:** Print the model vertically for the best structural performance.
+* **Supports:** Enable normal supports (Auto) with a **5° overhang angle**.
 
 <div align="center">
 
