@@ -8,7 +8,7 @@
 
 ---
 
-[Compatible with NeoLabs-Rockets launch system](https://github.com/NeoLabs-Rockets/Launch-System)
+[Compatible with NeoLabs-Rockets launch system](https://github.com/NeoLabs-Rockets/Launch-System) -
 [Compatible with NeoLabs-Rockets launch platform](https://github.com/NeoLabs-Rockets/Launch-Platform)
 
 ---
