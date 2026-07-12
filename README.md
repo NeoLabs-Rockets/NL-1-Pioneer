@@ -14,10 +14,26 @@
 ---
 
 </div>
+<div align="center">
+  
+# Compatible with the following motors
+| Manufacturer | Motors |
+|--------------|--------|
+| Estes | 1/2A6-2, A8-3, B4-2, B6-4, B6-6, C5-3, C6-3, C6-5, C6-7 |
+| Quest | A6-4, A8-3, B6-2, B6-4, C6-3, C6-5 |
+| Klima | B2, B4, C6 |
+| AeroTech (Q-Jet) | C12, C18, D10, D13, D20 *(some variants may be slightly longer than 70 mm)* |
 
+# Print Settings
+
+* **Material:** ABS recommended; PLA+ is also suitable.
+* **Infill:** the less the better. **5%**
+* **Orientation:** Print the model vertically.
+* **Supports:** normal Supports (Auto), **5° overhang angle**.
 
 <img width="284" height="782" alt="image" src="https://github.com/user-attachments/assets/9cb37dd3-bf62-48fa-8d4a-9fca75b3c756" />
 
+</div>
 
 ---
 
