@@ -6,6 +6,8 @@
 
 **Rocket systems by NeoLabs — The rocket to start it all**
 
+[![Join the NeoLabs Discord](https://img.shields.io/badge/Join%20NeoLabs-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/f59rg2RwUT)
+
 ---
 
 [Compatible with NeoLabs-Rockets launch system](https://github.com/NeoLabs-Rockets/Launch-System) -
