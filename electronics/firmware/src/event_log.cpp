@@ -19,7 +19,8 @@ QueueHandle_t q = nullptr;
 #endif
 uint32_t drops = 0;
 
-static constexpr size_t LINE_MAX = 384;
+// Do not name this LINE_MAX — POSIX limits.h defines that as a macro.
+static constexpr size_t kEventLineMax = 384;
 
 const char* eventTypeName(EventType t) {
   switch (t) {
@@ -69,12 +70,12 @@ void formatLine(char* out, size_t out_len, EventType type, const char* message, 
 void begin() {
   drops = 0;
 #ifndef UNIT_TEST
-  if (!q) q = xQueueCreate(EVENT_QUEUE_LEN, LINE_MAX);
+  if (!q) q = xQueueCreate(EVENT_QUEUE_LEN, kEventLineMax);
 #endif
 }
 
 void emit(EventType type, const char* message, const char* extra_json) {
-  char line[LINE_MAX];
+  char line[kEventLineMax];
   formatLine(line, sizeof(line), type, message, extra_json);
 #ifndef UNIT_TEST
   if (!q) {
@@ -117,7 +118,7 @@ uint32_t droppedCount() { return drops; }
 bool pop(char* out, size_t out_len) {
 #ifndef UNIT_TEST
   if (!q || !out || out_len < 2) return false;
-  char buf[LINE_MAX];
+  char buf[kEventLineMax];
   if (xQueueReceive(q, buf, 0) != pdTRUE) return false;
   strncpy(out, buf, out_len - 1);
   out[out_len - 1] = '\0';

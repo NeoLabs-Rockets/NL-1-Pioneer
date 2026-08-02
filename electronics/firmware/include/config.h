@@ -4,6 +4,7 @@
  * Thresholds, rates, camera profiles, and safety timeouts live here.
  */
 
+#include <stddef.h>
 #include <stdint.h>
 #include "board_pins.h"
 

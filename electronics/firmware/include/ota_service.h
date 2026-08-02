@@ -8,6 +8,7 @@
  * Blocked while recording or in-flight. Never triggers ignition.
  */
 
+#include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
 
