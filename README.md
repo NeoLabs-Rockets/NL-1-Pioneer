@@ -46,6 +46,7 @@ The rocket is designed to be **modular**, **low-cost**, and **easy to extend** w
 <div align="center">
 
 <img width="284" height="782" alt="image" src="https://github.com/user-attachments/assets/9cb37dd3-bf62-48fa-8d4a-9fca75b3c756" />
+<img width="503" height="610" alt="image" src="https://github.com/user-attachments/assets/70e12a98-f4bd-4217-868c-7f9df8ef584b" />
 
 </div>
 
