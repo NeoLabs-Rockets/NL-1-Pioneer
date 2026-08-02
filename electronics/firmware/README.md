@@ -30,6 +30,24 @@ pio device monitor -b 115200
 
 Requirements: PlatformIO, USB cable, board in download mode if needed (BOOT + RESET).
 
+### OTA (Bluetooth)
+
+Same protocol shape as the Launch Controller:
+
+| Char | UUID |
+|------|------|
+| OTA control | `9c4e0007-…` |
+| OTA data | `9c4e0008-…` |
+| OTA status | `9c4e0009-…` |
+
+- Blocked while recording or in flight
+- SHA-256 verified; device reboots after `finish`
+- Dashboard: **Settings → Rocket Computer Firmware → Check & Update RC**
+- CI: `.github/workflows/rc-firmware.yml` builds and publishes the rolling `rc-firmware-latest` release
+- Mission Dashboard pulls from `RC_FIRMWARE_GITHUB_REPOSITORY` / `RC_FIRMWARE_RELEASE_TAG` (defaults: `NeoLabs-Rockets/NL-1-Pioneer` + `rc-firmware-latest`)
+
+Base version: `firmware-version.txt` (CI appends `+<sha12>`).
+
 ### Host unit tests
 
 ```bash
@@ -67,6 +85,8 @@ Modules under `src/` / `include/`:
 - Service UUID: `9c4e0001-6a2b-4c8d-9e1f-1d6c7a0b2000`  
   (Launch Controller uses `8f3a0001-…` — **separate**.)
 - Command JSON (same spirit as Launch System): `{"cmd":"arm","sid":"…","seq":N}`
+- File export (chunked): characteristic `9c4e0006-…` + commands `list_flights`, `list_files`, `file_begin`, `file_read`, `file_close`, `delete_flight`
+- Mission Dashboard **RC Data** tab downloads a flight as ZIP over BLE, then can delete it on-device
 
 See [docs/BLE_PROTOCOL.md](docs/BLE_PROTOCOL.md).
 

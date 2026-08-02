@@ -24,4 +24,11 @@ void serviceCommands();
 void setTelemetryHz(uint32_t hz);
 uint32_t telemetryHz();
 
+// Notify binary file chunk: header + payload
+// Layout: [u32 offset LE][u32 total LE][u16 len LE][data...]
+bool notifyFileChunk(uint32_t offset, uint32_t total, const uint8_t* data, uint16_t len);
+
+// Notify text/JSON on event characteristic (command results, file list, etc.)
+void notifyEventJson(const char* json);
+
 }  // namespace BleServer

@@ -108,10 +108,18 @@ static constexpr char BLE_COMMAND_UUID[]   = "9c4e0002-6a2b-4c8d-9e1f-1d6c7a0b20
 static constexpr char BLE_STATUS_UUID[]    = "9c4e0003-6a2b-4c8d-9e1f-1d6c7a0b2000";
 static constexpr char BLE_TELEMETRY_UUID[] = "9c4e0004-6a2b-4c8d-9e1f-1d6c7a0b2000";
 static constexpr char BLE_EVENT_UUID[]     = "9c4e0005-6a2b-4c8d-9e1f-1d6c7a0b2000";
+// Binary file-download data channel (chunked flight export).
+static constexpr char BLE_FILE_DATA_UUID[] = "9c4e0006-6a2b-4c8d-9e1f-1d6c7a0b2000";
+// BLE OTA (same shape as Launch Controller 8f3a0004–0006).
+static constexpr char BLE_OTA_CONTROL_UUID[] = "9c4e0007-6a2b-4c8d-9e1f-1d6c7a0b2000";
+static constexpr char BLE_OTA_DATA_UUID[]    = "9c4e0008-6a2b-4c8d-9e1f-1d6c7a0b2000";
+static constexpr char BLE_OTA_STATUS_UUID[]  = "9c4e0009-6a2b-4c8d-9e1f-1d6c7a0b2000";
 
 static constexpr uint16_t BLE_MTU_TARGET = 185;
 static constexpr size_t BLE_MSG_ID_CACHE = 32;
 static constexpr uint32_t BLE_CMD_QUEUE_LEN = 16;
+// File chunk payload budget after ATT headers (~3) and our 10-byte header.
+static constexpr size_t BLE_FILE_CHUNK_MAX = 160;
 
 // ── Storage layout ──────────────────────────────────────────────────────────
 static constexpr char SD_MOUNT[] = "/sd";

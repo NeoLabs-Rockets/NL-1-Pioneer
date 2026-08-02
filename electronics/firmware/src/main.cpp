@@ -26,6 +26,7 @@
 #include "storage.h"
 #include "camera_recorder.h"
 #include "ble_server.h"
+#include "ota_service.h"
 #include "crc16.h"
 
 static SensorSnapshot g_sensors{};
@@ -203,6 +204,7 @@ static void missionTask(void*) {
   uint32_t last_status_ms = 0;
   for (;;) {
     BleServer::serviceCommands();
+    OtaService::loop();
     MissionFsm::tick(TimeManager::monoMs());
 
     fillSystemSnapshot();
@@ -271,6 +273,7 @@ void setup() {
 }
 
 void loop() {
+  OtaService::loop();
   esp_task_wdt_reset();
-  vTaskDelay(pdMS_TO_TICKS(1000));
+  vTaskDelay(pdMS_TO_TICKS(100));
 }

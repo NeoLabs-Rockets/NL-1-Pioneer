@@ -37,4 +37,42 @@ bool enqueueFrame(const uint8_t* data, size_t len, uint32_t idx, uint64_t mono_u
 // Storage task entry
 void taskLoop();
 
+// ── Flight data export (BLE download) ───────────────────────────────────────
+static constexpr int MAX_FLIGHT_LIST = 24;
+static constexpr int MAX_FILE_LIST = 12;
+
+struct FlightInfo {
+  char name[48];
+  uint32_t total_bytes;
+  uint8_t file_count;
+  bool incomplete;
+  bool is_active;  // currently open recording session
+};
+
+struct FileInfo {
+  char name[40];
+  uint32_t size;
+};
+
+// Returns number of flights written to out (<= max).
+int listFlights(FlightInfo* out, int max);
+
+// List files inside /flights/<flightName>/
+int listFiles(const char* flightName, FileInfo* out, int max);
+
+// Open a file for sequential/random read. Fails if active recording uses it.
+bool beginFileRead(const char* flightName, const char* fileName, uint32_t* sizeOut);
+// Read up to maxLen bytes at absolute offset. Returns bytes read (0 = EOF/error).
+size_t readFileAt(uint32_t offset, uint8_t* buf, size_t maxLen);
+void endFileRead();
+bool fileReadOpen();
+const char* fileReadPath();
+uint32_t fileReadSize();
+
+// Delete an entire flight directory. Refuses active session.
+bool deleteFlight(const char* flightName);
+
+// True if SD is mounted and not in a failed state.
+bool readyForTransfer();
+
 }  // namespace Storage

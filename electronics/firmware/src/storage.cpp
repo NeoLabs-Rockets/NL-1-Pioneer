@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+#include <ctype.h>
 
 namespace Storage {
 namespace {
@@ -412,6 +413,249 @@ void taskLoop() {
   serviceEvents();
   uint64_t now = TimeManager::monoMs();
   if (session_open && now - last_flush_ms >= SD_FLUSH_INTERVAL_MS) flush();
+#endif
+}
+
+// ── Flight export ───────────────────────────────────────────────────────────
+namespace {
+#ifndef UNIT_TEST
+File f_read;
+char read_path[128] = "";
+uint32_t read_size = 0;
+bool read_open = false;
+
+bool safeFlightName(const char* name) {
+  if (!name || !name[0] || strlen(name) >= 48) return false;
+  if (strstr(name, "..")) return false;
+  for (const char* p = name; *p; p++) {
+    const char c = *p;
+    if (c == '/' || c == '\\') return false;
+    if (!(isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-' || c == '.')) return false;
+  }
+  if (name[0] == '.') return false;
+  return true;
+}
+
+bool safeFileName(const char* name) {
+  if (!name || !name[0] || strlen(name) >= 40) return false;
+  for (const char* p = name; *p; p++) {
+    const char c = *p;
+    if (c == '/' || c == '\\') return false;
+    if (!(isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-' || c == '.')) return false;
+  }
+  if (name[0] == '.') return false;
+  return true;
+}
+
+bool removeTree(const char* path) {
+  File dir = SD.open(path);
+  if (!dir) return false;
+  if (!dir.isDirectory()) {
+    dir.close();
+    return SD.remove(path);
+  }
+  File e = dir.openNextFile();
+  while (e) {
+    char child[128];
+    // e.name() may be full path or basename depending on FS
+    const char* n = e.name();
+    if (strchr(n, '/')) {
+      strncpy(child, n, sizeof(child) - 1);
+      child[sizeof(child) - 1] = '\0';
+    } else {
+      snprintf(child, sizeof(child), "%s/%s", path, n);
+    }
+    const bool isDir = e.isDirectory();
+    e.close();
+    if (isDir) {
+      if (!removeTree(child)) {
+        dir.close();
+        return false;
+      }
+    } else if (!SD.remove(child)) {
+      dir.close();
+      return false;
+    }
+    e = dir.openNextFile();
+  }
+  dir.close();
+  return SD.rmdir(path);
+}
+#endif
+}  // namespace
+
+bool readyForTransfer() {
+  return st == StorageState::MOUNTED || st == StorageState::WRITING || st == StorageState::FULL;
+}
+
+int listFlights(FlightInfo* out, int max) {
+  if (!out || max <= 0) return 0;
+  int count = 0;
+#ifndef UNIT_TEST
+  if (!readyForTransfer()) return 0;
+  File root = SD.open(FLIGHTS_DIR);
+  if (!root || !root.isDirectory()) return 0;
+  File e = root.openNextFile();
+  while (e && count < max) {
+    if (e.isDirectory()) {
+      const char* raw = e.name();
+      const char* base = strrchr(raw, '/');
+      base = base ? base + 1 : raw;
+      if (base[0] && base[0] != '.') {
+        FlightInfo& fi = out[count];
+        memset(&fi, 0, sizeof(fi));
+        strncpy(fi.name, base, sizeof(fi.name) - 1);
+        fi.is_active = session_open && strstr(session_dir, base) != nullptr;
+        char flag[128];
+        snprintf(flag, sizeof(flag), "%s/%s/incomplete.flag", FLIGHTS_DIR, base);
+        fi.incomplete = SD.exists(flag);
+        // Sum file sizes
+        char dirPath[96];
+        snprintf(dirPath, sizeof(dirPath), "%s/%s", FLIGHTS_DIR, base);
+        File d = SD.open(dirPath);
+        if (d && d.isDirectory()) {
+          File f = d.openNextFile();
+          while (f) {
+            if (!f.isDirectory()) {
+              fi.total_bytes += static_cast<uint32_t>(f.size());
+              fi.file_count++;
+            }
+            f = d.openNextFile();
+          }
+          d.close();
+        }
+        count++;
+      }
+    }
+    e = root.openNextFile();
+  }
+  root.close();
+#else
+  (void)out; (void)max;
+#endif
+  return count;
+}
+
+int listFiles(const char* flightName, FileInfo* out, int max) {
+  if (!out || max <= 0) return 0;
+  int count = 0;
+#ifndef UNIT_TEST
+  if (!readyForTransfer() || !safeFlightName(flightName)) return 0;
+  char dirPath[96];
+  snprintf(dirPath, sizeof(dirPath), "%s/%s", FLIGHTS_DIR, flightName);
+  File d = SD.open(dirPath);
+  if (!d || !d.isDirectory()) return 0;
+  File f = d.openNextFile();
+  while (f && count < max) {
+    if (!f.isDirectory()) {
+      const char* raw = f.name();
+      const char* base = strrchr(raw, '/');
+      base = base ? base + 1 : raw;
+      if (strcmp(base, "incomplete.flag") != 0) {
+        FileInfo& fi = out[count];
+        memset(&fi, 0, sizeof(fi));
+        strncpy(fi.name, base, sizeof(fi.name) - 1);
+        fi.size = static_cast<uint32_t>(f.size());
+        count++;
+      }
+    }
+    f = d.openNextFile();
+  }
+  d.close();
+#else
+  (void)flightName;
+#endif
+  return count;
+}
+
+bool beginFileRead(const char* flightName, const char* fileName, uint32_t* sizeOut) {
+#ifndef UNIT_TEST
+  endFileRead();
+  if (!readyForTransfer() || !safeFlightName(flightName) || !safeFileName(fileName)) return false;
+  if (session_open && strstr(session_dir, flightName)) {
+    // Allow read of closed files only — refuse active session export mid-record
+    return false;
+  }
+  snprintf(read_path, sizeof(read_path), "%s/%s/%s", FLIGHTS_DIR, flightName, fileName);
+  f_read = SD.open(read_path, FILE_READ);
+  if (!f_read) {
+    read_path[0] = '\0';
+    return false;
+  }
+  read_size = static_cast<uint32_t>(f_read.size());
+  read_open = true;
+  if (sizeOut) *sizeOut = read_size;
+  return true;
+#else
+  (void)flightName; (void)fileName; (void)sizeOut;
+  return false;
+#endif
+}
+
+size_t readFileAt(uint32_t offset, uint8_t* buf, size_t maxLen) {
+#ifndef UNIT_TEST
+  if (!read_open || !f_read || !buf || !maxLen) return 0;
+  if (offset >= read_size) return 0;
+  if (!f_read.seek(offset)) return 0;
+  size_t want = maxLen;
+  if (offset + want > read_size) want = read_size - offset;
+  return f_read.read(buf, want);
+#else
+  (void)offset; (void)buf; (void)maxLen;
+  return 0;
+#endif
+}
+
+void endFileRead() {
+#ifndef UNIT_TEST
+  if (f_read) f_read.close();
+  read_open = false;
+  read_size = 0;
+  read_path[0] = '\0';
+#endif
+}
+
+bool fileReadOpen() {
+#ifndef UNIT_TEST
+  return read_open;
+#else
+  return false;
+#endif
+}
+
+const char* fileReadPath() {
+#ifndef UNIT_TEST
+  return read_path;
+#else
+  return "";
+#endif
+}
+
+uint32_t fileReadSize() {
+#ifndef UNIT_TEST
+  return read_size;
+#else
+  return 0;
+#endif
+}
+
+bool deleteFlight(const char* flightName) {
+#ifndef UNIT_TEST
+  if (!readyForTransfer() || !safeFlightName(flightName)) return false;
+  if (session_open && strstr(session_dir, flightName)) return false;
+  if (read_open && strstr(read_path, flightName)) endFileRead();
+  char dirPath[96];
+  snprintf(dirPath, sizeof(dirPath), "%s/%s", FLIGHTS_DIR, flightName);
+  if (!SD.exists(dirPath)) return false;
+  const bool ok = removeTree(dirPath);
+  if (ok) {
+    refreshSpace();
+    EventLog::emit(EventType::WARNING, "flight_deleted", flightName);
+  }
+  return ok;
+#else
+  (void)flightName;
+  return false;
 #endif
 }
 

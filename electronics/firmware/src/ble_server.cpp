@@ -7,6 +7,7 @@
 #include "storage.h"
 #include "camera_recorder.h"
 #include "sensors.h"
+#include "ota_service.h"
 
 #ifndef UNIT_TEST
 #include <NimBLEDevice.h>
@@ -25,6 +26,7 @@ NimBLECharacteristic* statusChar = nullptr;
 NimBLECharacteristic* telemetryChar = nullptr;
 NimBLECharacteristic* eventChar = nullptr;
 NimBLECharacteristic* commandChar = nullptr;
+NimBLECharacteristic* fileDataChar = nullptr;
 
 QueueHandle_t cmd_q = nullptr;
 static constexpr size_t CMD_MAX = 256;
@@ -85,6 +87,10 @@ void begin() {
       BLE_TELEMETRY_UUID, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY);
   eventChar = service->createCharacteristic(
       BLE_EVENT_UUID, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY);
+  fileDataChar = service->createCharacteristic(
+      BLE_FILE_DATA_UUID, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY);
+
+  OtaService::attachToService(service);
 
   service->start();
   NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
@@ -92,6 +98,7 @@ void begin() {
   adv->enableScanResponse(true);
   adv->setName(BLE_DEVICE_NAME);
   adv->start();
+  OtaService::publishStatus();
 #endif
 }
 
@@ -147,16 +154,20 @@ uint32_t telemetryHz() {
 void publishStatus(const SystemSnapshot& snap, const SensorSnapshot& sensors) {
 #ifndef UNIT_TEST
   if (!statusChar) return;
-  char data[360];
+  char data[400];
   const int32_t left = snap.countdown_left_ms;
+  // `ver` = firmware version (OTA); `pv` = protocol major. Keep `v` as protocol
+  // for older dashboards that read protocol version.
   snprintf(data, sizeof(data),
-    "{\"v\":%d,\"m\":\"%s\",\"r\":%u,\"ph\":\"%s\",\"ble\":%u,\"sd\":%u,\"cam\":%u,"
+    "{\"v\":%d,\"pv\":%d,\"ver\":\"%s\",\"m\":\"%s\",\"r\":%u,\"ph\":\"%s\",\"ble\":%u,\"sd\":%u,\"cam\":%u,"
     "\"rec\":%d,\"left\":%ld,\"ign\":%lld,\"lo\":%lld,\"fps\":%.1f,\"fw\":%lu,\"fd\":%lu,"
     "\"free_kb\":%lu,\"imu\":%u,\"baro\":%u,\"e\":\"%s\",\"w\":\"%s\",\"u\":%lu,"
     "\"ax\":%.2f,\"ay\":%.2f,\"az\":%.2f,\"amag\":%.2f,"
     "\"p\":%.1f,\"alt\":%.2f,\"vz\":%.2f,"
-    "\"tb\":%.1f,\"ti\":%.1f,\"tm\":%.1f,\"gt\":%d}",
+    "\"tb\":%.1f,\"ti\":%.1f,\"tm\":%.1f,\"gt\":%d,\"ota\":%d}",
     PROTOCOL_VERSION_MAJOR,
+    PROTOCOL_VERSION_MAJOR,
+    FIRMWARE_VERSION,
     missionStateName(snap.mission),
     static_cast<unsigned>(snap.recording),
     flightPhaseName(snap.phase),
@@ -181,7 +192,8 @@ void publishStatus(const SystemSnapshot& snap, const SensorSnapshot& sensors) {
     sensors.temps[0].valid ? sensors.temps[0].celsius : -999.f,
     sensors.temps[1].valid ? sensors.temps[1].celsius : -999.f,
     sensors.temps[2].valid ? sensors.temps[2].celsius : -999.f,
-    snap.ground_test ? 1 : 0
+    snap.ground_test ? 1 : 0,
+    OtaService::active() ? 1 : 0
   );
   statusChar->setValue(reinterpret_cast<uint8_t*>(data), strlen(data));
   if (connected_count > 0) statusChar->notify();
@@ -222,19 +234,48 @@ void serviceCommands() {
   if (!cmd_q) return;
   char body[CMD_MAX];
   while (xQueueReceive(cmd_q, body, 0) == pdTRUE) {
-    char response[320];
+    char response[400];
     CommandHandler::handleJson(body, response, sizeof(response));
-    if (statusChar) {
-      // Piggy-back command result on status characteristic for simplicity;
-      // also mirror to event characteristic.
-      if (eventChar && connected_count > 0) {
-        eventChar->setValue(reinterpret_cast<uint8_t*>(response), strlen(response));
-        eventChar->notify();
-      }
+    if (eventChar && connected_count > 0 && response[0]) {
+      eventChar->setValue(reinterpret_cast<uint8_t*>(response), strlen(response));
+      eventChar->notify();
     }
-    // Always refresh full status after a command
-    // (caller may also publish; lightweight re-notify of result as status update)
   }
+#endif
+}
+
+bool notifyFileChunk(uint32_t offset, uint32_t total, const uint8_t* data, uint16_t len) {
+#ifndef UNIT_TEST
+  if (!fileDataChar || connected_count <= 0 || !data || !len) return false;
+  if (len > BLE_FILE_CHUNK_MAX) len = BLE_FILE_CHUNK_MAX;
+  uint8_t packet[10 + BLE_FILE_CHUNK_MAX];
+  packet[0] = static_cast<uint8_t>(offset);
+  packet[1] = static_cast<uint8_t>(offset >> 8);
+  packet[2] = static_cast<uint8_t>(offset >> 16);
+  packet[3] = static_cast<uint8_t>(offset >> 24);
+  packet[4] = static_cast<uint8_t>(total);
+  packet[5] = static_cast<uint8_t>(total >> 8);
+  packet[6] = static_cast<uint8_t>(total >> 16);
+  packet[7] = static_cast<uint8_t>(total >> 24);
+  packet[8] = static_cast<uint8_t>(len);
+  packet[9] = static_cast<uint8_t>(len >> 8);
+  memcpy(packet + 10, data, len);
+  fileDataChar->setValue(packet, 10 + len);
+  fileDataChar->notify();
+  return true;
+#else
+  (void)offset; (void)total; (void)data; (void)len;
+  return false;
+#endif
+}
+
+void notifyEventJson(const char* json) {
+#ifndef UNIT_TEST
+  if (!eventChar || connected_count <= 0 || !json) return;
+  eventChar->setValue(reinterpret_cast<const uint8_t*>(json), strlen(json));
+  eventChar->notify();
+#else
+  (void)json;
 #endif
 }
 

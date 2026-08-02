@@ -6,6 +6,8 @@
 #include "config.h"
 #include "sensors.h"
 #include "flight_detect.h"
+#include "storage.h"
+#include "ble_server.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -150,9 +152,10 @@ CmdResult handleJson(const char* body, char* response_out, size_t response_len) 
       snprintf(response_out, response_len,
                "{\"v\":%d,\"cmd\":\"capabilities\",\"result\":\"ACK\","
                "\"board\":\"%s\",\"fw\":\"%s\",\"imu\":\"LSM6DSO32\",\"baro\":\"BMP580\","
-               "\"camera\":true,\"sd\":true,\"battery_adc\":false,"
-               "\"protocol\":\"%d.%d\",\"ignition_control\":false}",
+               "\"camera\":true,\"sd\":true,\"battery_adc\":false,\"file_transfer\":true,"
+               "\"chunk\":%u,\"protocol\":\"%d.%d\",\"ignition_control\":false}",
                PROTOCOL_VERSION_MAJOR, BOARD_MODEL_NAME, FIRMWARE_VERSION,
+               static_cast<unsigned>(BLE_FILE_CHUNK_MAX),
                PROTOCOL_VERSION_MAJOR, PROTOCOL_VERSION_MINOR);
       EventLog::emitCommand(cmd, msg_id, body, result, detail);
       if (critical) rememberProcessed(msg_id);
@@ -244,6 +247,146 @@ CmdResult handleJson(const char* body, char* response_out, size_t response_len) 
     }
     result = CmdResult::ACK;
     detail = "ground_test";
+  } else if (!strcmp(cmd, Cmd::LIST_FLIGHTS) || !strcmp(cmd, "list_flights")) {
+    Storage::FlightInfo flights[Storage::MAX_FLIGHT_LIST];
+    const int n = Storage::listFlights(flights, Storage::MAX_FLIGHT_LIST);
+    // Build compact list JSON and send on event channel (may be larger than ACK).
+    char list[900];
+    size_t pos = 0;
+    pos += snprintf(list + pos, sizeof(list) - pos,
+                    "{\"v\":%d,\"cmd\":\"list_flights\",\"result\":\"ACK\",\"seq\":%lu,\"flights\":[",
+                    PROTOCOL_VERSION_MAJOR, static_cast<unsigned long>(seq));
+    for (int i = 0; i < n && pos + 80 < sizeof(list); i++) {
+      pos += snprintf(list + pos, sizeof(list) - pos,
+                      "%s{\"name\":\"%s\",\"bytes\":%lu,\"files\":%u,\"incomplete\":%s,\"active\":%s}",
+                      i ? "," : "",
+                      flights[i].name,
+                      static_cast<unsigned long>(flights[i].total_bytes),
+                      static_cast<unsigned>(flights[i].file_count),
+                      flights[i].incomplete ? "true" : "false",
+                      flights[i].is_active ? "true" : "false");
+    }
+    snprintf(list + pos, sizeof(list) - pos, "]}");
+    BleServer::notifyEventJson(list);
+    result = CmdResult::ACK;
+    detail = "list_flights";
+    if (response_out && response_len) {
+      snprintf(response_out, response_len,
+               "{\"v\":%d,\"cmd\":\"list_flights\",\"result\":\"ACK\",\"count\":%d,\"seq\":%lu}",
+               PROTOCOL_VERSION_MAJOR, n, static_cast<unsigned long>(seq));
+    }
+    EventLog::emitCommand(cmd, msg_id, body, result, detail);
+    return result;
+  } else if (!strcmp(cmd, Cmd::LIST_FILES) || !strcmp(cmd, "list_files")) {
+    char flight[48] = "";
+    jsonString(body, "flight", flight, sizeof(flight));
+    Storage::FileInfo files[Storage::MAX_FILE_LIST];
+    const int n = Storage::listFiles(flight, files, Storage::MAX_FILE_LIST);
+    char list[700];
+    size_t pos = 0;
+    pos += snprintf(list + pos, sizeof(list) - pos,
+                    "{\"v\":%d,\"cmd\":\"list_files\",\"result\":\"ACK\",\"seq\":%lu,\"flight\":\"%s\",\"files\":[",
+                    PROTOCOL_VERSION_MAJOR, static_cast<unsigned long>(seq), flight);
+    for (int i = 0; i < n && pos + 60 < sizeof(list); i++) {
+      pos += snprintf(list + pos, sizeof(list) - pos,
+                      "%s{\"name\":\"%s\",\"size\":%lu}",
+                      i ? "," : "", files[i].name, static_cast<unsigned long>(files[i].size));
+    }
+    snprintf(list + pos, sizeof(list) - pos, "]}");
+    BleServer::notifyEventJson(list);
+    result = n >= 0 ? CmdResult::ACK : CmdResult::NACK;
+    detail = "list_files";
+    if (response_out && response_len) {
+      snprintf(response_out, response_len,
+               "{\"v\":%d,\"cmd\":\"list_files\",\"result\":\"%s\",\"count\":%d,\"seq\":%lu}",
+               PROTOCOL_VERSION_MAJOR, result == CmdResult::ACK ? "ACK" : "NACK", n,
+               static_cast<unsigned long>(seq));
+    }
+    EventLog::emitCommand(cmd, msg_id, body, result, detail);
+    return result;
+  } else if (!strcmp(cmd, Cmd::FILE_BEGIN) || !strcmp(cmd, "file_begin")) {
+    char flight[48] = "";
+    char file[40] = "";
+    jsonString(body, "flight", flight, sizeof(flight));
+    jsonString(body, "file", file, sizeof(file));
+    uint32_t size = 0;
+    if (!Storage::beginFileRead(flight, file, &size)) {
+      result = CmdResult::NACK;
+      detail = MissionFsm::recordingActive() ? "recording_active_or_missing" : "open_failed";
+    } else {
+      result = CmdResult::ACK;
+      detail = "file_open";
+      if (response_out && response_len) {
+        snprintf(response_out, response_len,
+                 "{\"v\":%d,\"cmd\":\"file_begin\",\"result\":\"ACK\",\"flight\":\"%s\","
+                 "\"file\":\"%s\",\"size\":%lu,\"chunk\":%u,\"seq\":%lu}",
+                 PROTOCOL_VERSION_MAJOR, flight, file,
+                 static_cast<unsigned long>(size),
+                 static_cast<unsigned>(BLE_FILE_CHUNK_MAX),
+                 static_cast<unsigned long>(seq));
+        EventLog::emitCommand(cmd, msg_id, body, result, detail);
+        return result;
+      }
+    }
+  } else if (!strcmp(cmd, Cmd::FILE_READ) || !strcmp(cmd, "file_read")) {
+    if (!Storage::fileReadOpen()) {
+      result = CmdResult::NACK;
+      detail = "no_open_file";
+    } else {
+      const uint32_t offset = static_cast<uint32_t>(jsonInt64(body, "offset", 0));
+      int req = jsonInt(body, "len", static_cast<int>(BLE_FILE_CHUNK_MAX));
+      if (req <= 0) req = static_cast<int>(BLE_FILE_CHUNK_MAX);
+      if (req > static_cast<int>(BLE_FILE_CHUNK_MAX)) req = static_cast<int>(BLE_FILE_CHUNK_MAX);
+      const uint32_t total = Storage::fileReadSize();
+      uint8_t buf[BLE_FILE_CHUNK_MAX];
+      size_t got = Storage::readFileAt(offset, buf, static_cast<size_t>(req));
+      if (got == 0) {
+        result = CmdResult::ACK;
+        detail = (offset >= total) ? "eof" : "read_fail";
+        if (response_out && response_len) {
+          snprintf(response_out, response_len,
+                   "{\"v\":%d,\"cmd\":\"file_read\",\"result\":\"ACK\",\"offset\":%lu,\"len\":0,"
+                   "\"eof\":true,\"seq\":%lu}",
+                   PROTOCOL_VERSION_MAJOR, static_cast<unsigned long>(offset),
+                   static_cast<unsigned long>(seq));
+          EventLog::emitCommand(cmd, msg_id, body, result, detail);
+          return result;
+        }
+      } else {
+        BleServer::notifyFileChunk(offset, total, buf, static_cast<uint16_t>(got));
+        result = CmdResult::ACK;
+        detail = "chunk";
+        if (response_out && response_len) {
+          snprintf(response_out, response_len,
+                   "{\"v\":%d,\"cmd\":\"file_read\",\"result\":\"ACK\",\"offset\":%lu,\"len\":%u,"
+                   "\"total\":%lu,\"seq\":%lu}",
+                   PROTOCOL_VERSION_MAJOR,
+                   static_cast<unsigned long>(offset),
+                   static_cast<unsigned>(got),
+                   static_cast<unsigned long>(total),
+                   static_cast<unsigned long>(seq));
+          EventLog::emitCommand(cmd, msg_id, body, result, detail);
+          return result;
+        }
+      }
+    }
+  } else if (!strcmp(cmd, Cmd::FILE_CLOSE) || !strcmp(cmd, "file_close")) {
+    Storage::endFileRead();
+    result = CmdResult::ACK;
+    detail = "closed";
+  } else if (!strcmp(cmd, Cmd::DELETE_FLIGHT) || !strcmp(cmd, "delete_flight")) {
+    char flight[48] = "";
+    jsonString(body, "flight", flight, sizeof(flight));
+    if (MissionFsm::recordingActive()) {
+      result = CmdResult::REJECTED;
+      detail = "recording_active";
+    } else if (!Storage::deleteFlight(flight)) {
+      result = CmdResult::NACK;
+      detail = "delete_failed";
+    } else {
+      result = CmdResult::ACK;
+      detail = "deleted";
+    }
   } else {
     result = CmdResult::NACK;
     detail = "unknown_cmd";

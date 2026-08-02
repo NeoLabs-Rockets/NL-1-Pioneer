@@ -287,6 +287,13 @@ namespace Cmd {
   constexpr const char* RESET = "reset";
   constexpr const char* PING = "ping";
   constexpr const char* GROUND_TEST = "ground_test";
+  // Flight data export over BLE
+  constexpr const char* LIST_FLIGHTS = "list_flights";
+  constexpr const char* LIST_FILES = "list_files";
+  constexpr const char* FILE_BEGIN = "file_begin";
+  constexpr const char* FILE_READ = "file_read";
+  constexpr const char* FILE_CLOSE = "file_close";
+  constexpr const char* DELETE_FLIGHT = "delete_flight";
 }
 
 // Command allow / deny results
