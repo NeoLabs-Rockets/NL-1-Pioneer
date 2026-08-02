@@ -856,6 +856,17 @@
 			(uuid "badde210-1bd6-4a9c-8842-983cd1d8ad33")
 		)
 		(embedded_fonts no)
+		(model "${KIPRJMOD}/3dmodels/XIAO_ESP32S3_Sense.step"
+			(offset
+				(xyz 6.1 -1.8 2.5)
+			)
+			(scale
+				(xyz 1 1 1)
+			)
+			(rotate
+				(xyz -90 -0 -90)
+			)
+		)
 	)
 	(footprint "TestPoint:TestPoint_Loop_D2.50mm_Drill1.85mm"
 		(layer "F.Cu")
@@ -1519,6 +1530,17 @@
 			(uuid "c5b71013-7dc2-41a3-85c7-0fa7122cdf78")
 		)
 		(embedded_fonts no)
+		(model "${KIPRJMOD}/3dmodels/Adafruit_LSM6DSO32_Breakout.step"
+			(offset
+				(xyz -12.7 -8.9 2.5)
+			)
+			(scale
+				(xyz 1 1 1)
+			)
+			(rotate
+				(xyz -0 -0 -0)
+			)
+		)
 	)
 	(footprint "GOOBAY:GOOBAY_10013"
 		(layer "F.Cu")
@@ -1768,6 +1790,17 @@
 			(uuid "8b8ee456-273f-4163-bb23-a40c10950914")
 		)
 		(embedded_fonts no)
+		(model "${KIPRJMOD}/3dmodels/GOOBAY_10013.step"
+			(offset
+				(xyz 0 0 0)
+			)
+			(scale
+				(xyz 1 1 1)
+			)
+			(rotate
+				(xyz 0 0 0)
+			)
+		)
 	)
 	(footprint "Adafruit_Breakouts:Adafruit_BMP580_Breakout"
 		(layer "F.Cu")
@@ -2147,6 +2180,17 @@
 			(uuid "b9531d2c-cf49-4efb-93de-eb9bd164546b")
 		)
 		(embedded_fonts no)
+		(model "${KIPRJMOD}/3dmodels/Adafruit_BMP580_Breakout.step"
+			(offset
+				(xyz -12.7 -8.9 2.5)
+			)
+			(scale
+				(xyz 1 1 1)
+			)
+			(rotate
+				(xyz -0 -0 -0)
+			)
+		)
 	)
 	(gr_rect
 		(start 152.8 67.4)
@@ -2204,6 +2248,14 @@
 				(size 1.5 2)
 			)
 		)
+	)
+	(segment
+		(start 168.6 73.1)
+		(end 176.1 73.1)
+		(width 0.6)
+		(layer "F.Cu")
+		(net "Net-(SW1-Pad2)")
+		(uuid "be85feb4-b5ec-4550-9817-6355cbf8500b")
 	)
 	(segment
 		(start 179.3 119.5)
@@ -2862,30 +2914,6 @@
 		(uuid "ff3c7faf-181f-4a46-916a-d91f53fceccc")
 	)
 	(segment
-		(start 168.6 73.1)
-		(end 176.1 73.1)
-		(width 0.6)
-		(layer "F.Cu")
-		(net "Net-(SW1-Pad2)")
-		(uuid "be85feb4-b5ec-4550-9817-6355cbf8500b")
-	)
-	(segment
-		(start 166 73.2)
-		(end 166.1 73.1)
-		(width 0.6)
-		(layer "F.Cu")
-		(net "Net-(SW1-Pad1)")
-		(uuid "a43e2166-c5a6-469b-a74d-f05157faba81")
-	)
-	(segment
-		(start 158 73.2)
-		(end 166 73.2)
-		(width 0.6)
-		(layer "F.Cu")
-		(net "Net-(SW1-Pad1)")
-		(uuid "b4ec958c-d283-496a-8529-63720dfb7e7e")
-	)
-	(segment
 		(start 162.3 115.1)
 		(end 154.2 107)
 		(width 0.6)
@@ -3028,6 +3056,22 @@
 		(layer "F.Cu")
 		(net "GND")
 		(uuid "fdf9c97f-d2c9-4ae8-b0ba-94f68d5200ca")
+	)
+	(segment
+		(start 166 73.2)
+		(end 166.1 73.1)
+		(width 0.6)
+		(layer "F.Cu")
+		(net "Net-(SW1-Pad1)")
+		(uuid "a43e2166-c5a6-469b-a74d-f05157faba81")
+	)
+	(segment
+		(start 158 73.2)
+		(end 166 73.2)
+		(width 0.6)
+		(layer "F.Cu")
+		(net "Net-(SW1-Pad1)")
+		(uuid "b4ec958c-d283-496a-8529-63720dfb7e7e")
 	)
 	(zone
 		(net "GND")
