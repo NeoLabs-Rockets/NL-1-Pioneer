@@ -68,6 +68,9 @@ static constexpr int CAM_PIN_PCLK  = 13;
 // measurement is therefore not available as a dedicated sensing path.
 #define BATTERY_VOLTAGE_MEASURABLE 0
 
-// User LED on XIAO ESP32-S3 (active low on many revisions)
-static constexpr int PIN_USER_LED = 21;  // shared with SD CS on Sense — do not use while SD active
-#define USER_LED_AVAILABLE 0
+// User LED on XIAO ESP32-S3 (amber, active-low: LOW = on, HIGH = off).
+// On Sense this pin is shared with microSD CS (PIN_SD_CS). Only drive the LED
+// when SD is idle, and leave the pin HIGH afterward (LED off / CS deselect).
+static constexpr int PIN_USER_LED = 21;
+static constexpr bool USER_LED_ACTIVE_LOW = true;
+#define USER_LED_AVAILABLE 1

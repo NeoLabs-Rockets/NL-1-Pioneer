@@ -89,9 +89,12 @@ bool initCamera(CameraProfileId id) {
 
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
+    Serial.printf("[NL1] camera_init profile=%d err=0x%x\n",
+                  static_cast<int>(id), static_cast<unsigned>(err));
     EventLog::emit(EventType::CAMERA_FAULT, "camera_init_failed");
     return false;
   }
+  Serial.printf("[NL1] camera_init OK profile=%s\n", kProfiles[static_cast<int>(id)].name);
   sensor_t* sensor = esp_camera_sensor_get();
   if (sensor) {
     sensor->set_brightness(sensor, 0);

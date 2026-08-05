@@ -50,6 +50,44 @@ float readMcuTempC() {
 
 }  // namespace
 
+#ifndef UNIT_TEST
+// Scan 7-bit addresses and print responders for bring-up / wiring debug.
+static int i2cScanAndLog(const char* tag, int sda, int scl, uint32_t hz) {
+  Wire.end();
+  // Weak internal pull-ups help if external STEMMA pull-ups are missing.
+  pinMode(sda, INPUT_PULLUP);
+  pinMode(scl, INPUT_PULLUP);
+  delay(2);
+  int sda_lvl = digitalRead(sda);
+  int scl_lvl = digitalRead(scl);
+  Serial.printf("[NL1] I2C %s SDA=GPIO%d SCL=GPIO%d @ %lu Hz (idle SDA=%d SCL=%d, expect 1/1)\n",
+                tag, sda, scl, static_cast<unsigned long>(hz), sda_lvl, scl_lvl);
+
+  Wire.begin(sda, scl);
+  Wire.setClock(hz);
+  delay(20);
+
+  int found = 0;
+  for (uint8_t addr = 0x08; addr < 0x78; addr++) {
+    Wire.beginTransmission(addr);
+    uint8_t err = Wire.endTransmission();
+    if (err == 0) {
+      found++;
+      const char* who = "";
+      if (addr == ADDR_BMP580 || addr == ADDR_BMP580_ALT) who = " (BMP580?)";
+      else if (addr == ADDR_LSM6DSO32 || addr == ADDR_LSM6DSO32_ALT) who = " (LSM6DSO32?)";
+      Serial.printf("[NL1]   I2C device at 0x%02X%s\n", addr, who);
+    }
+  }
+  if (found == 0) {
+    Serial.println("[NL1]   I2C: no devices responded");
+  } else {
+    Serial.printf("[NL1]   I2C: %d device(s) found\n", found);
+  }
+  return found;
+}
+#endif
+
 bool begin() {
   imu_ok = false;
   baro_ok = false;
@@ -60,9 +98,31 @@ bool begin() {
   sim_enabled = false;
 
 #ifndef UNIT_TEST
-  Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL, I2C_FREQ_HZ);
+  // PCB nets (onboard-systems.kicad_pcb):
+  //   SDA = U1 D4/GPIO5 → U2.SDA + U3.SDA
+  //   SCL = U1 D5/GPIO6 → U2.SCL + U3.SCL
+  //   VIN = U1 3V3
+  // Try 100 kHz first (more tolerant of capacitance / weak pull-ups), then 400 kHz.
+  int found = i2cScanAndLog("primary", PIN_I2C_SDA, PIN_I2C_SCL, 100000);
+  if (found == 0) {
+    found = i2cScanAndLog("primary-400k", PIN_I2C_SDA, PIN_I2C_SCL, I2C_FREQ_HZ);
+  }
+  if (found == 0) {
+    // Diagnostic only: detect SDA/SCL swap on a hand-wired board.
+    found = i2cScanAndLog("swapped", PIN_I2C_SCL, PIN_I2C_SDA, 100000);
+    if (found > 0) {
+      Serial.println("[NL1] WARNING: devices only visible with SDA/SCL swapped!");
+    } else {
+      // Restore primary pin map for library probes below.
+      Wire.end();
+      Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
+      Wire.setClock(100000);
+    }
+  }
 
-  // LSM6DSO32
+  delay(50);  // allow breakouts to come out of power-on reset
+
+  // LSM6DSO32 — try both address straps
   if (lsm.begin_I2C(ADDR_LSM6DSO32, &Wire) || lsm.begin_I2C(ADDR_LSM6DSO32_ALT, &Wire)) {
     lsm.setAccelRange(LSM6DSO32_ACCEL_RANGE_32_G);
     lsm.setGyroRange(LSM6DS_GYRO_RANGE_2000_DPS);
@@ -70,9 +130,11 @@ bool begin() {
     lsm.setGyroDataRate(LSM6DS_RATE_104_HZ);
     imu_ok = true;
     imu_h = SensorHealth::OK;
+    Serial.println("[NL1] LSM6DSO32 OK");
   } else {
     EventLog::emit(EventType::SENSOR_FAULT, "LSM6DSO32_missing");
     imu_h = SensorHealth::MISSING;
+    Serial.println("[NL1] LSM6DSO32 MISSING");
   }
 
   // BMP580 (Adafruit_BMP5xx: pressure field is hPa after performReading)
@@ -81,9 +143,11 @@ bool begin() {
     bmp.setPowerMode(BMP5XX_POWERMODE_NORMAL);
     baro_ok = true;
     baro_h = SensorHealth::OK;
+    Serial.println("[NL1] BMP580 OK");
   } else {
     EventLog::emit(EventType::SENSOR_FAULT, "BMP580_missing");
     baro_h = SensorHealth::MISSING;
+    Serial.println("[NL1] BMP580 MISSING");
   }
 #else
   imu_ok = true;

@@ -123,8 +123,11 @@ static constexpr uint32_t BLE_CMD_QUEUE_LEN = 16;
 static constexpr size_t BLE_FILE_CHUNK_MAX = 160;
 
 // ── Storage layout ──────────────────────────────────────────────────────────
-static constexpr char SD_MOUNT[] = "/sd";
-static constexpr char FLIGHTS_DIR[] = "/sd/flights";
+// Arduino-esp32 SD VFS mounts the card at "/sd" and *prepends* that mount point
+// to every path passed to SD.open/mkdir/exists. Paths here must be card-root
+// relative (e.g. "/flights"), NOT "/sd/flights" — otherwise you get "/sd/sd/...".
+static constexpr char SD_MOUNT[] = "/sd";  // VFS mount point (informational)
+static constexpr char FLIGHTS_DIR[] = "/flights";
 static constexpr size_t TELEMETRY_RING_SAMPLES = 256;
 static constexpr size_t EVENT_QUEUE_LEN = 64;
 static constexpr size_t FRAME_QUEUE_LEN = 4;

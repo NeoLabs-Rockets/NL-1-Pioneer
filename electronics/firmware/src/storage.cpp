@@ -164,15 +164,36 @@ bool begin() {
   st = StorageState::UNKNOWN;
   session_open = false;
 #ifndef UNIT_TEST
+  // Sense microSD: CS=GPIO21, MOSI=9, MISO=8, SCK=7 (SPI).
+  // Start conservative; drop to 4 MHz if 25 MHz mount fails (common with marginal cards).
   sdSpi.begin(PIN_SD_SCK, PIN_SD_MISO, PIN_SD_MOSI, PIN_SD_CS);
-  if (!SD.begin(PIN_SD_CS, sdSpi, 25000000)) {
+  bool mounted = SD.begin(PIN_SD_CS, sdSpi, 25000000);
+  if (!mounted) {
+    Serial.println("[NL1] SD mount @25MHz failed, retry @4MHz");
+    SD.end();
+    mounted = SD.begin(PIN_SD_CS, sdSpi, 4000000);
+  }
+  if (!mounted) {
     st = StorageState::MISSING;
     EventLog::emit(EventType::STORAGE_FAULT, "sd_mount_failed");
+    Serial.println("[NL1] SD MISSING (mount failed)");
     return false;
   }
   refreshSpace();
   st = free_b < SD_MIN_FREE_BYTES ? StorageState::FULL : StorageState::MOUNTED;
-  ensureDir(FLIGHTS_DIR);
+  Serial.printf("[NL1] SD mounted: free=%llu / total=%llu bytes\n",
+                static_cast<unsigned long long>(free_b),
+                static_cast<unsigned long long>(total_b));
+
+  if (!ensureDir(FLIGHTS_DIR)) {
+    // Second chance after remount semantics; still fail soft so diagnostics print.
+    Serial.printf("[NL1] SD mkdir %s failed\n", FLIGHTS_DIR);
+    EventLog::emit(EventType::STORAGE_FAULT, "flights_dir_failed");
+    st = StorageState::ERROR;
+    return false;
+  }
+  Serial.printf("[NL1] SD flights dir OK: %s\n", FLIGHTS_DIR);
+
   telem_q = xQueueCreate(TELEMETRY_RING_SAMPLES, sizeof(TelemetryRecord));
   frame_q = xQueueCreate(FRAME_QUEUE_LEN, sizeof(FrameMsg));
   recoverOrphanSessions();

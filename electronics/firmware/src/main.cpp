@@ -33,6 +33,50 @@ static SensorSnapshot g_sensors{};
 static SystemSnapshot g_system{};
 static portMUX_TYPE g_snap_mux = portMUX_INITIALIZER_UNLOCKED;
 
+// ── Status LED (XIAO amber user LED, GPIO21, active-low) ────────────────────
+// Shared with microSD CS on Sense. Only flash during early boot *before*
+// Storage::begin(); after SD is claimed we must never drive this pin.
+#if USER_LED_AVAILABLE
+static bool g_led_released_for_sd = false;
+
+static void statusLedWrite(bool on) {
+  if (g_led_released_for_sd) return;
+  // Active-low: true → LOW (lit), false → HIGH (off / CS deselect)
+  digitalWrite(PIN_USER_LED, (on ^ USER_LED_ACTIVE_LOW) ? HIGH : LOW);
+}
+
+static void statusLedInit() {
+  g_led_released_for_sd = false;
+  pinMode(PIN_USER_LED, OUTPUT);
+  statusLedWrite(false);
+}
+
+static void statusLedBootFlash() {
+  for (int i = 0; i < 8; ++i) {
+    statusLedWrite(true);
+    delay(60);
+    statusLedWrite(false);
+    delay(60);
+  }
+}
+
+// Hand the pin permanently to the SD driver (CS). Call before/after SD.begin.
+static void statusLedReleaseForSd() {
+  statusLedWrite(false);  // HIGH = CS deselect
+  g_led_released_for_sd = true;
+}
+
+static void statusLedHeartbeat() {
+  // No runtime LED on Sense — GPIO21 is SD CS once the card is mounted.
+}
+#else
+static void statusLedWrite(bool) {}
+static void statusLedInit() {}
+static void statusLedBootFlash() {}
+static void statusLedReleaseForSd() {}
+static void statusLedHeartbeat() {}
+#endif
+
 static void fillSystemSnapshot() {
   CameraRecorder::Stats cs = CameraRecorder::stats();
   g_system.mission = MissionFsm::state();
@@ -239,6 +283,10 @@ void setup() {
   delay(200);
   Serial.printf("\n[NL1] Rocket Computer %s\n", FIRMWARE_VERSION);
 
+  // Visual proof-of-life before SD claims GPIO21 as CS.
+  statusLedInit();
+  statusLedBootFlash();
+
   TimeManager::begin();
   EventLog::begin();
   MissionFsm::begin();
@@ -249,7 +297,10 @@ void setup() {
   esp_task_wdt_init(WDT_TIMEOUT_S, true);
   esp_task_wdt_add(NULL);
 
+  // Release GPIO21 to SD CS before mounting the card.
+  statusLedReleaseForSd();
   bool sd_ok = Storage::begin();
+
   bool sens_ok = Sensors::begin();
   bool cam_ok = CameraRecorder::begin();
   FlightDetect::begin();
@@ -268,12 +319,18 @@ void setup() {
   xTaskCreatePinnedToCore(missionTask, "mission", 8192, nullptr, PRIO_MISSION, nullptr, 0);
 
   Serial.println("[NL1] ready — advertising as NeoLabs Rocket Computer");
-  Serial.printf("[NL1] SD=%d IMU=%d BARO=%d CAM=%d\n",
-                sd_ok, Sensors::imuPresent(), Sensors::baroPresent(), cam_ok);
+  Serial.printf("[NL1] SD=%d (free=%llu MB) IMU=%d BARO=%d CAM=%d\n",
+                sd_ok,
+                static_cast<unsigned long long>(Storage::freeBytes() / (1024ULL * 1024ULL)),
+                Sensors::imuPresent(), Sensors::baroPresent(), cam_ok);
+  Serial.printf("[NL1] storage_state=%d camera_state=%d\n",
+                static_cast<int>(Storage::state()),
+                static_cast<int>(CameraRecorder::state()));
 }
 
 void loop() {
+  statusLedHeartbeat();
   OtaService::loop();
   esp_task_wdt_reset();
-  vTaskDelay(pdMS_TO_TICKS(100));
+  vTaskDelay(pdMS_TO_TICKS(20));
 }
