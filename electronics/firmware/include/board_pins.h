@@ -37,7 +37,9 @@ static constexpr uint8_t ADDR_LSM6DSO32  = 0x6A;  // Adafruit default
 static constexpr uint8_t ADDR_LSM6DSO32_ALT = 0x6B;
 
 // ── Onboard microSD (XIAO ESP32-S3 Sense) ───────────────────────────────────
-// Seeed pin multiplexing docs: SD occupies D8/D9/D10 + CS on GPIO21
+// Seeed wiki: CS=GPIO21, SCK=D8/GPIO7, MISO=D9/GPIO8, MOSI=D10/GPIO9.
+// Matches variants/XIAO_ESP32S3/pins_arduino.h (MOSI/MISO/SCK defaults).
+// Init with default SPI + SD.begin(21) — not a custom SPIClass(FSPI).
 static constexpr int PIN_SD_CS   = 21;
 static constexpr int PIN_SD_MOSI = 9;   // D10
 static constexpr int PIN_SD_MISO = 8;   // D9

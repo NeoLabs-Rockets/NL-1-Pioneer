@@ -230,7 +230,9 @@ CmdResult cmdStartRecording(const char* reason) {
 }
 
 CmdResult cmdStopRecording(const char* reason, bool force) {
-  if (!force && missionInFlight(mission)) return CmdResult::REJECTED;
+  if (!force && (missionInFlight(mission) || phaseInFlight(phase))) {
+    return CmdResult::REJECTED;
+  }
   if (recording == RecordingState::IDLE || recording == RecordingState::STOPPED) {
     return CmdResult::IGNORED;
   }
@@ -330,7 +332,8 @@ CmdResult cmdAbort(const char* reason) {
 }
 
 CmdResult cmdReset(bool force) {
-  if (!force && (missionInFlight(mission) || recording == RecordingState::POST_LANDING
+  if (!force && (missionInFlight(mission) || phaseInFlight(phase)
+                 || recording == RecordingState::POST_LANDING
                  || recording == RecordingState::ACTIVE)) {
     return CmdResult::REJECTED;
   }

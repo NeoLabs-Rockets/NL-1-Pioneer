@@ -10,6 +10,7 @@
 #include "ota_service.h"
 
 #ifndef UNIT_TEST
+#include <Arduino.h>  // Serial — payload-over-MTU diagnostic in publishStatus()
 #include <NimBLEDevice.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
@@ -156,46 +157,54 @@ void publishStatus(const SystemSnapshot& snap, const SensorSnapshot& sensors) {
   if (!statusChar) return;
   char data[400];
   const int32_t left = snap.countdown_left_ms;
-  // `ver` = firmware version (OTA); `pv` = protocol major. Keep `v` as protocol
-  // for older dashboards that read protocol version.
+  // `ver` = firmware version (OTA); `v` = protocol major.
+  // Kinematics (ax/ay/az/amag/p/alt/vz) and fps are deliberately NOT repeated
+  // here — they ship in publishTelemetry() at a higher rate and the dashboard
+  // already prefers the telemetry copy (`t.ax ?? s.ax`). Duplicating them cost
+  // ~86 B and pushed the whole payload past the ATT MTU, which truncated the
+  // notification and made the JSON unparseable. `pv`/`ble`/`ign`/`u`/`gt`/`ota`
+  // had no consumer at all. Error/warning strings are capped so a long fault
+  // message can never blow the budget mid-flight.
   snprintf(data, sizeof(data),
-    "{\"v\":%d,\"pv\":%d,\"ver\":\"%s\",\"m\":\"%s\",\"r\":%u,\"ph\":\"%s\",\"ble\":%u,\"sd\":%u,\"cam\":%u,"
-    "\"rec\":%d,\"left\":%ld,\"ign\":%lld,\"lo\":%lld,\"fps\":%.1f,\"fw\":%lu,\"fd\":%lu,"
-    "\"free_kb\":%lu,\"imu\":%u,\"baro\":%u,\"e\":\"%s\",\"w\":\"%s\",\"u\":%lu,"
-    "\"ax\":%.2f,\"ay\":%.2f,\"az\":%.2f,\"amag\":%.2f,"
-    "\"p\":%.1f,\"alt\":%.2f,\"vz\":%.2f,"
-    "\"tb\":%.1f,\"ti\":%.1f,\"tm\":%.1f,\"gt\":%d,\"ota\":%d}",
-    PROTOCOL_VERSION_MAJOR,
+    "{\"v\":%d,\"ver\":\"%s\",\"m\":\"%s\",\"r\":%u,\"ph\":\"%s\",\"sd\":%u,\"cam\":%u,"
+    "\"rec\":%d,\"left\":%ld,\"lo\":%lld,\"fw\":%lu,\"fd\":%lu,"
+    "\"free_kb\":%lu,\"imu\":%u,\"baro\":%u,"
+    "\"tb\":%.1f,\"ti\":%.1f,\"tm\":%.1f,\"e\":\"%.24s\",\"w\":\"%.24s\"}",
     PROTOCOL_VERSION_MAJOR,
     FIRMWARE_VERSION,
     missionStateName(snap.mission),
     static_cast<unsigned>(snap.recording),
     flightPhaseName(snap.phase),
-    static_cast<unsigned>(snap.bluetooth),
     static_cast<unsigned>(snap.storage),
     static_cast<unsigned>(snap.camera),
     snap.recording == RecordingState::ACTIVE || snap.recording == RecordingState::POST_LANDING ? 1 : 0,
     static_cast<long>(left),
-    static_cast<long long>(snap.expected_ignition_mono_ms),
     static_cast<long long>(snap.actual_liftoff_mono_ms),
-    snap.actual_fps,
     static_cast<unsigned long>(snap.frames_written),
     static_cast<unsigned long>(snap.frames_dropped),
     static_cast<unsigned long>(snap.free_sd_bytes / 1024ULL),
     static_cast<unsigned>(sensors.imu_health),
     static_cast<unsigned>(sensors.baro_health),
-    snap.last_error,
-    snap.last_warning,
-    static_cast<unsigned long>(snap.uptime_ms),
-    sensors.ax, sensors.ay, sensors.az, sensors.accel_mag,
-    sensors.pressure_pa, sensors.altitude_m, sensors.vert_vel_ms,
     sensors.temps[0].valid ? sensors.temps[0].celsius : -999.f,
     sensors.temps[1].valid ? sensors.temps[1].celsius : -999.f,
     sensors.temps[2].valid ? sensors.temps[2].celsius : -999.f,
-    snap.ground_test ? 1 : 0,
-    OtaService::active() ? 1 : 0
+    snap.last_error,
+    snap.last_warning
   );
-  statusChar->setValue(reinterpret_cast<uint8_t*>(data), strlen(data));
+
+  // A payload over the budget is truncated on the wire and the peer silently
+  // fails to parse it. Never let that happen without saying so.
+  const size_t len = strlen(data);
+  static bool over_budget_warned = false;
+  if (len > BLE_NOTIFY_BUDGET && !over_budget_warned) {
+    over_budget_warned = true;
+    Serial.printf("[NL1] BLE status %u B > notify budget %u B — peers will see "
+                  "truncated JSON and drop every status update\n",
+                  static_cast<unsigned>(len),
+                  static_cast<unsigned>(BLE_NOTIFY_BUDGET));
+  }
+
+  statusChar->setValue(reinterpret_cast<uint8_t*>(data), len);
   if (connected_count > 0) statusChar->notify();
 #else
   (void)snap; (void)sensors;

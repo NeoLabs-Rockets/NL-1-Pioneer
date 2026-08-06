@@ -116,7 +116,14 @@ static constexpr char BLE_OTA_CONTROL_UUID[] = "9c4e0007-6a2b-4c8d-9e1f-1d6c7a0b
 static constexpr char BLE_OTA_DATA_UUID[]    = "9c4e0008-6a2b-4c8d-9e1f-1d6c7a0b2000";
 static constexpr char BLE_OTA_STATUS_UUID[]  = "9c4e0009-6a2b-4c8d-9e1f-1d6c7a0b2000";
 
-static constexpr uint16_t BLE_MTU_TARGET = 185;
+// Preferred ATT MTU. The negotiated value is min(this, central's offer), so a
+// low value here silently caps every notification: a payload longer than
+// (MTU - 3) is truncated on the wire and the peer's JSON.parse throws.
+// 185 was too small for the status payload (~330 B) — the dashboard never saw
+// a parseable status. Chrome/CoreBluetooth offer ~527; NimBLE's ceiling is 517.
+static constexpr uint16_t BLE_MTU_TARGET = 512;
+// Largest notification payload guaranteed to survive the negotiated MTU.
+static constexpr size_t BLE_NOTIFY_BUDGET = BLE_MTU_TARGET - 3;
 static constexpr size_t BLE_MSG_ID_CACHE = 32;
 static constexpr uint32_t BLE_CMD_QUEUE_LEN = 16;
 // File chunk payload budget after ATT headers (~3) and our 10-byte header.

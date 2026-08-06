@@ -113,6 +113,18 @@ enum class FlightPhase : uint8_t {
   UNKNOWN
 };
 
+// True when the *detected* flight phase says we are airborne.
+// The mission state can lag or skip entirely — setFlightPhase() only advances
+// it from an already-in-flight (or APOGEE) state, so a missed liftoff
+// detection leaves mission == ARMED while the phase reads DESCENT. Guards that
+// key on mission state alone therefore disengage mid-flight. Command guards
+// must consult both.
+inline bool phaseInFlight(FlightPhase p) {
+  return p == FlightPhase::LIFTOFF || p == FlightPhase::POWERED_ASCENT
+      || p == FlightPhase::COAST || p == FlightPhase::APOGEE
+      || p == FlightPhase::DESCENT || p == FlightPhase::IMPACT;
+}
+
 inline const char* flightPhaseName(FlightPhase p) {
   switch (p) {
     case FlightPhase::PRELAUNCH: return "PRELAUNCH";

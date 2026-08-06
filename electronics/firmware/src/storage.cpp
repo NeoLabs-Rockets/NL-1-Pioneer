@@ -14,6 +14,10 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include <esp_system.h>
+#include <esp_vfs_fat.h>
+#include <driver/sdspi_host.h>
+#include <driver/spi_common.h>
+#include <sdmmc_cmd.h>
 #endif
 
 #include <stdio.h>
@@ -41,7 +45,6 @@ File f_telem;
 File f_events;
 File f_video;
 File f_meta;
-SPIClass sdSpi(FSPI);
 
 struct FrameMsg {
   uint32_t len;
@@ -160,33 +163,180 @@ void writeAviHeaderPlaceholder() {
 
 }  // namespace
 
+#ifndef UNIT_TEST
+// Probe Sense microSD via ESP-IDF SDSPI (bypasses Arduino SD bitbang path).
+// On success we unmount again and rebind with Arduino SD so the rest of the
+// firmware can keep using the SD class. Pure diagnostic + alternate bring-up.
+static bool sdTryIdfMount(uint8_t cs, spi_host_device_t host_id, const char* tag) {
+  // Ensure Arduino SPI has released the controller.
+  SPI.end();
+  delay(20);
+
+  spi_bus_config_t bus_cfg = {};
+  bus_cfg.mosi_io_num = PIN_SD_MOSI;
+  bus_cfg.miso_io_num = PIN_SD_MISO;
+  bus_cfg.sclk_io_num = PIN_SD_SCK;
+  bus_cfg.quadwp_io_num = -1;
+  bus_cfg.quadhd_io_num = -1;
+  bus_cfg.max_transfer_sz = 4000;
+
+  esp_err_t err = spi_bus_initialize(host_id, &bus_cfg, SDSPI_DEFAULT_DMA);
+  if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+    Serial.printf("[NL1] SD IDF %s spi_bus_initialize host=%d err=0x%x\n",
+                  tag, static_cast<int>(host_id), static_cast<unsigned>(err));
+    return false;
+  }
+
+  sdmmc_host_t host = SDSPI_HOST_DEFAULT();
+  host.slot = host_id;
+  host.max_freq_khz = 4000;  // 4 MHz — reliable for first contact
+
+  sdspi_device_config_t slot = SDSPI_DEVICE_CONFIG_DEFAULT();
+  slot.gpio_cs = static_cast<gpio_num_t>(cs);
+  slot.host_id = host_id;
+
+  esp_vfs_fat_sdmmc_mount_config_t mount_cfg = {};
+  mount_cfg.format_if_mount_failed = false;
+  mount_cfg.max_files = 5;
+  mount_cfg.allocation_unit_size = 16 * 1024;
+
+  sdmmc_card_t* card = nullptr;
+  const char* mp = "/sd_idf";
+  err = esp_vfs_fat_sdspi_mount(mp, &host, &slot, &mount_cfg, &card);
+  if (err != ESP_OK) {
+    Serial.printf("[NL1] SD IDF %s mount CS=%u host=%d failed: %s (0x%x)\n",
+                  tag, cs, static_cast<int>(host_id), esp_err_to_name(err),
+                  static_cast<unsigned>(err));
+    spi_bus_free(host_id);
+    return false;
+  }
+
+  Serial.printf("[NL1] SD IDF %s mount OK CS=%u host=%d name=%s\n",
+                tag, cs, static_cast<int>(host_id),
+                card && card->cid.name[0] ? card->cid.name : "?");
+  // Hand bus back so Arduino SD can take over with the same pins.
+  esp_vfs_fat_sdcard_unmount(mp, card);
+  spi_bus_free(host_id);
+  delay(50);
+  return true;
+}
+
+static bool sdMountArduino(uint8_t cs, uint32_t hz, const char* tag) {
+  SD.end();
+  SPI.end();
+  delay(20);
+  pinMode(cs, OUTPUT);
+  digitalWrite(cs, HIGH);
+  pinMode(PIN_SD_MISO, INPUT_PULLUP);
+  delay(50);
+
+  // Official Seeed Sense path: default SPI (SCK7/MISO8/MOSI9) + CS.
+  // Do not pass a custom SPIClass(FSPI) — board pins_arduino already maps SPI.
+  Serial.printf("[NL1] SD Arduino %s CS=GPIO%u @ %lu Hz\n",
+                tag, cs, static_cast<unsigned long>(hz));
+  if (SD.begin(cs, SPI, hz)) return true;
+
+  // Explicit pin begin then retry (some core builds need this).
+  SD.end();
+  SPI.end();
+  delay(20);
+  SPI.begin(PIN_SD_SCK, PIN_SD_MISO, PIN_SD_MOSI, cs);
+  digitalWrite(cs, HIGH);
+  Serial.printf("[NL1] SD Arduino %s-explicit CS=GPIO%u @ %lu Hz\n",
+                tag, cs, static_cast<unsigned long>(hz));
+  return SD.begin(cs, SPI, hz);
+}
+#endif
+
 bool begin() {
   st = StorageState::UNKNOWN;
   session_open = false;
 #ifndef UNIT_TEST
-  // Sense microSD: CS=GPIO21, MOSI=9, MISO=8, SCK=7 (SPI).
-  // Start conservative; drop to 4 MHz if 25 MHz mount fails (common with marginal cards).
-  sdSpi.begin(PIN_SD_SCK, PIN_SD_MISO, PIN_SD_MOSI, PIN_SD_CS);
-  bool mounted = SD.begin(PIN_SD_CS, sdSpi, 25000000);
-  if (!mounted) {
-    Serial.println("[NL1] SD mount @25MHz failed, retry @4MHz");
-    SD.end();
-    mounted = SD.begin(PIN_SD_CS, sdSpi, 4000000);
+  // XIAO ESP32-S3 Sense onboard microSD (fixed B2B + slot on expansion):
+  //   CS=GPIO21, SCK=GPIO7, MISO=GPIO8, MOSI=GPIO9  (Seeed wiki + pins_arduino)
+  delay(300);  // card power-up after USB attach / reset
+
+  bool mounted = false;
+  uint32_t mounted_hz = 4000000u;
+
+  // 1) Official Arduino path (what Seeed documents).
+  if (sdMountArduino(PIN_SD_CS, 4000000u, "seeed")) {
+    mounted = true;
   }
+
+  // 2) ESP-IDF SDSPI on SPI2 then rebind Arduino if IDF saw the card.
+  if (!mounted) {
+    if (sdTryIdfMount(PIN_SD_CS, SPI2_HOST, "spi2")) {
+      if (sdMountArduino(PIN_SD_CS, 4000000u, "after-idf-spi2")) {
+        mounted = true;
+      }
+    }
+  }
+
+  // 3) ESP-IDF on SPI3 (matrix any GPIO) — rules out SPI2 host issues.
+  if (!mounted) {
+    if (sdTryIdfMount(PIN_SD_CS, SPI3_HOST, "spi3")) {
+      if (sdMountArduino(PIN_SD_CS, 4000000u, "after-idf-spi3")) {
+        mounted = true;
+      }
+    }
+  }
+
+  // 4) Slow clock last resort.
+  if (!mounted) {
+    mounted = sdMountArduino(PIN_SD_CS, 400000u, "400khz");
+    if (mounted) mounted_hz = 400000u;
+  }
+
   if (!mounted) {
     st = StorageState::MISSING;
     EventLog::emit(EventType::STORAGE_FAULT, "sd_mount_failed");
-    Serial.println("[NL1] SD MISSING (mount failed)");
+    Serial.println("[NL1] SD MISSING (no SPI response from card — not a FAT issue)");
+    Serial.println("[NL1] SD hint: card never answered CMD0. Formatting/filesystem is NOT");
+    Serial.println("[NL1] SD hint: the cause — CMD0 precedes any FAT access. Check the bus:");
+    Serial.println("[NL1] SD hint: read GPIO7/8/9/21 as INPUT_PULLUP then INPUT_PULLDOWN.");
+    Serial.println("[NL1] SD hint: a line low in BOTH = shorted to GND; high in both = OK;");
+    Serial.println("[NL1] SD hint: tracking the pull = floating/open. A stuck MOSI (GPIO9)");
+    Serial.println("[NL1] SD hint: makes every card look dead. Then reseat card / Sense B2B.");
     return false;
   }
+
+  // Optional speed bump for video write bandwidth.
+  if (mounted_hz < 20000000u) {
+    SD.end();
+    delay(20);
+    if (SD.begin(PIN_SD_CS, SPI, 20000000u)) {
+      mounted_hz = 20000000u;
+      Serial.println("[NL1] SD speed boost @ 20 MHz OK");
+    } else {
+      SD.end();
+      delay(20);
+      if (!SD.begin(PIN_SD_CS, SPI, mounted_hz)) {
+        st = StorageState::MISSING;
+        EventLog::emit(EventType::STORAGE_FAULT, "sd_remount_failed");
+        Serial.println("[NL1] SD MISSING (lost after speed change)");
+        return false;
+      }
+    }
+  }
+
+  uint8_t cardType = SD.cardType();
+  const char* type_name = "UNKNOWN";
+  if (cardType == CARD_NONE) type_name = "NONE";
+  else if (cardType == CARD_MMC) type_name = "MMC";
+  else if (cardType == CARD_SD) type_name = "SDSC";
+  else if (cardType == CARD_SDHC) type_name = "SDHC";
+
   refreshSpace();
   st = free_b < SD_MIN_FREE_BYTES ? StorageState::FULL : StorageState::MOUNTED;
-  Serial.printf("[NL1] SD mounted: free=%llu / total=%llu bytes\n",
+  Serial.printf("[NL1] SD mounted: type=%s size=%llu MB free=%llu / total=%llu bytes @ %lu Hz\n",
+                type_name,
+                static_cast<unsigned long long>(SD.cardSize() / (1024ULL * 1024ULL)),
                 static_cast<unsigned long long>(free_b),
-                static_cast<unsigned long long>(total_b));
+                static_cast<unsigned long long>(total_b),
+                static_cast<unsigned long>(mounted_hz));
 
   if (!ensureDir(FLIGHTS_DIR)) {
-    // Second chance after remount semantics; still fail soft so diagnostics print.
     Serial.printf("[NL1] SD mkdir %s failed\n", FLIGHTS_DIR);
     EventLog::emit(EventType::STORAGE_FAULT, "flights_dir_failed");
     st = StorageState::ERROR;

@@ -34,43 +34,18 @@ static SystemSnapshot g_system{};
 static portMUX_TYPE g_snap_mux = portMUX_INITIALIZER_UNLOCKED;
 
 // ── Status LED (XIAO amber user LED, GPIO21, active-low) ────────────────────
-// Shared with microSD CS on Sense. Only flash during early boot *before*
-// Storage::begin(); after SD is claimed we must never drive this pin.
+// On Sense, GPIO21 is also microSD CS. Never drive it as an LED — any
+// pre-mount bit-banging of CS contributes to "Card Failed! cmd: 0x00".
 #if USER_LED_AVAILABLE
-static bool g_led_released_for_sd = false;
-
-static void statusLedWrite(bool on) {
-  if (g_led_released_for_sd) return;
-  // Active-low: true → LOW (lit), false → HIGH (off / CS deselect)
-  digitalWrite(PIN_USER_LED, (on ^ USER_LED_ACTIVE_LOW) ? HIGH : LOW);
-}
-
-static void statusLedInit() {
-  g_led_released_for_sd = false;
-  pinMode(PIN_USER_LED, OUTPUT);
-  statusLedWrite(false);
-}
-
-static void statusLedBootFlash() {
-  for (int i = 0; i < 8; ++i) {
-    statusLedWrite(true);
-    delay(60);
-    statusLedWrite(false);
-    delay(60);
-  }
-}
-
-// Hand the pin permanently to the SD driver (CS). Call before/after SD.begin.
+static void statusLedInit() {}
+static void statusLedBootFlash() {}
 static void statusLedReleaseForSd() {
-  statusLedWrite(false);  // HIGH = CS deselect
-  g_led_released_for_sd = true;
+  // Leave CS idle high before Storage::begin claims it.
+  pinMode(PIN_SD_CS, OUTPUT);
+  digitalWrite(PIN_SD_CS, HIGH);
 }
-
-static void statusLedHeartbeat() {
-  // No runtime LED on Sense — GPIO21 is SD CS once the card is mounted.
-}
+static void statusLedHeartbeat() {}
 #else
-static void statusLedWrite(bool) {}
 static void statusLedInit() {}
 static void statusLedBootFlash() {}
 static void statusLedReleaseForSd() {}
@@ -168,6 +143,9 @@ static void logResetReason() {
 // ── Tasks ───────────────────────────────────────────────────────────────────
 
 static void sensorTask(void*) {
+  // Subscribe before the loop: esp_task_wdt_reset() is a no-op (ESP_ERR_NOT_FOUND)
+  // for any task that was never added, so an unsubscribed task is unmonitored.
+  esp_task_wdt_add(nullptr);
   const TickType_t period = pdMS_TO_TICKS(1000 / SENSOR_HZ_IMU);
   TickType_t last = xTaskGetTickCount();
   uint32_t telem_div = 0;
@@ -206,6 +184,7 @@ static void sensorTask(void*) {
 }
 
 static void storageTask(void*) {
+  esp_task_wdt_add(nullptr);
   for (;;) {
     // Session start/stop driven by mission flags
     char reason[40];
@@ -235,6 +214,7 @@ static void storageTask(void*) {
 }
 
 static void cameraTask(void*) {
+  esp_task_wdt_add(nullptr);
   for (;;) {
     if (CameraRecorder::isRecording()) {
       CameraRecorder::service();
@@ -245,6 +225,7 @@ static void cameraTask(void*) {
 }
 
 static void missionTask(void*) {
+  esp_task_wdt_add(nullptr);
   uint32_t last_status_ms = 0;
   for (;;) {
     BleServer::serviceCommands();
@@ -301,8 +282,12 @@ void setup() {
   statusLedReleaseForSd();
   bool sd_ok = Storage::begin();
 
-  bool sens_ok = Sensors::begin();
+  // Camera SCCB (pins 39/40) shares the ESP32-S3 I2C controller with Wire.
+  // If sensors are brought up first, esp_camera_init() leaves external I2C
+  // (GPIO5/6) broken — scan/begin OK, then continuous Wire Error -1.
+  // Init camera first, then external sensors on Wire.
   bool cam_ok = CameraRecorder::begin();
+  bool sens_ok = Sensors::begin();
   FlightDetect::begin();
   BleServer::begin();
 

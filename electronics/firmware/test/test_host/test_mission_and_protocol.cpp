@@ -32,6 +32,29 @@ void setSimulation(bool) {}
 void injectSim(const SensorSnapshot&) {}
 }
 
+// Storage stubs — command_handler.cpp references the flight-export API, which
+// is SD/FreeRTOS backed and has no host implementation. These satisfy the
+// linker; protocol tests exercise command parsing, not real file transfer.
+namespace Storage {
+int listFlights(FlightInfo*, int) { return 0; }
+int listFiles(const char*, FileInfo*, int) { return 0; }
+bool beginFileRead(const char*, const char*, uint32_t* sizeOut) {
+  if (sizeOut) *sizeOut = 0;
+  return false;
+}
+size_t readFileAt(uint32_t, uint8_t*, size_t) { return 0; }
+void endFileRead() {}
+bool fileReadOpen() { return false; }
+uint32_t fileReadSize() { return 0; }
+bool deleteFlight(const char*) { return false; }
+}
+
+// BleServer stubs — notifications go nowhere on host.
+namespace BleServer {
+void notifyEventJson(const char*) {}
+bool notifyFileChunk(uint32_t, uint32_t, const uint8_t*, uint16_t) { return false; }
+}
+
 namespace TimeManager {
 void setFakeMonoUs(uint64_t us);
 }
