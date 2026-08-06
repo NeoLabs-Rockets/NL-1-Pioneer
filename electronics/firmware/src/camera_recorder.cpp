@@ -22,6 +22,7 @@ uint32_t frame_idx = 0;
 uint32_t window_frames = 0;
 uint64_t window_start_us = 0;
 uint32_t drop_streak = 0;
+bool dims_checked = false;
 
 struct ProfileDef {
   const char* name;
@@ -97,6 +98,18 @@ bool initCamera(CameraProfileId id) {
   Serial.printf("[NL1] camera_init OK profile=%s\n", kProfiles[static_cast<int>(id)].name);
   sensor_t* sensor = esp_camera_sensor_get();
   if (sensor) {
+    // OV2640/OV3660: the frame_size passed to esp_camera_init() is not always
+    // applied to the sensor itself — observed on real hardware producing
+    // 640x480 (VGA) frames while requesting SVGA (800x600), with esp_camera_init()
+    // returning ESP_OK and no fallback path taken. Setting it again explicitly
+    // after init forces the sensor register write. Verify against captured
+    // frame dimensions, not just this log line, if you suspect a regression.
+    framesize_t want = static_cast<framesize_t>(kProfiles[static_cast<int>(id)].framesize);
+    if (sensor->set_framesize(sensor, want) != 0) {
+      Serial.printf("[NL1] camera set_framesize(%d) failed after init — frames may not "
+                    "match profile=%s\n", static_cast<int>(want), kProfiles[static_cast<int>(id)].name);
+      EventLog::emit(EventType::WARNING, "camera_framesize_mismatch");
+    }
     sensor->set_brightness(sensor, 0);
     sensor->set_contrast(sensor, 0);
     sensor->set_saturation(sensor, 0);
@@ -150,6 +163,7 @@ bool start() {
   window_frames = 0;
   window_start_us = TimeManager::monoUs();
   drop_streak = 0;
+  dims_checked = false;
   return true;
 }
 
@@ -193,6 +207,18 @@ void service() {
     return;
   }
   drop_streak = 0;
+  if (!dims_checked) {
+    dims_checked = true;
+    const ProfileDef& p = kProfiles[static_cast<int>(profile)];
+    if (static_cast<int>(fb->width) != p.width || static_cast<int>(fb->height) != p.height) {
+      // Ground truth from the driver's own frame buffer header — catches a
+      // silent sensor/driver mismatch regardless of what set_framesize()
+      // claimed at init. This is what actually ends up in the recorded video.
+      Serial.printf("[NL1] camera frame size mismatch: got %ux%u, profile %s wants %dx%d\n",
+                    fb->width, fb->height, p.name, p.width, p.height);
+      EventLog::emit(EventType::WARNING, "camera_framesize_mismatch");
+    }
+  }
   uint64_t mono = TimeManager::monoUs();
   bool ok = Storage::enqueueFrame(fb->buf, fb->len, frame_idx++, mono);
   esp_camera_fb_return(fb);
